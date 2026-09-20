@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2020-2021 PX4 Development Team. All rights reserved.
+ *   Copyright (C) 2021 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,71 +31,9 @@
  *
  ****************************************************************************/
 
-#include <px4_platform_common/getopt.h>
-#include <px4_platform_common/module.h>
+#include <px4_arch/i2c_hw_description.h>
 
-#include "BMI088.hpp"
-
-void BMI088::print_usage()
-{
-	PRINT_MODULE_USAGE_NAME("bmi088", "driver");
-	PRINT_MODULE_USAGE_SUBCATEGORY("imu");
-	PRINT_MODULE_USAGE_COMMAND("start");
-	PRINT_MODULE_USAGE_PARAM_FLAG('A', "Accel", true);
-	PRINT_MODULE_USAGE_PARAM_FLAG('G', "Gyro", true);
-	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(false, true);
-	PRINT_MODULE_USAGE_PARAM_INT('R', 0, 0, 35, "Rotation", true);
-	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
-}
-
-extern "C" int bmi088_main(int argc, char *argv[])
-{
-	int ch;
-	using ThisDriver = BMI088;
-	BusCLIArguments cli{false, true};
-	uint16_t type = 0;
-	cli.default_spi_frequency = 1000000;
-	const char *name = MODULE_NAME;
-
-	while ((ch = cli.getOpt(argc, argv, "AGR:")) != EOF) {
-		switch (ch) {
-		case 'A':
-			type = DRV_ACC_DEVTYPE_BMI088;
-			name = MODULE_NAME "_accel";
-			break;
-
-		case 'G':
-			type = DRV_GYR_DEVTYPE_BMI088;
-			name = MODULE_NAME "_gyro";
-			break;
-
-		case 'R':
-			cli.rotation = (enum Rotation)atoi(cli.optArg());
-			break;
-		}
-	}
-
-	const char *verb = cli.optArg();
-
-	if (!verb || type == 0) {
-		ThisDriver::print_usage();
-		return -1;
-	}
-
-	BusInstanceIterator iterator(name, cli, type);
-
-	if (!strcmp(verb, "start")) {
-		return ThisDriver::module_start(cli, iterator);
-	}
-
-	if (!strcmp(verb, "stop")) {
-		return ThisDriver::module_stop(iterator);
-	}
-
-	if (!strcmp(verb, "status")) {
-		return ThisDriver::module_status(iterator);
-	}
-
-	ThisDriver::print_usage();
-	return -1;
-}
+constexpr px4_i2c_bus_t px4_i2c_buses[I2C_BUS_MAX_BUS_ITEMS] = {
+	initI2CBusExternal(1),
+	initI2CBusInternal(2),
+};

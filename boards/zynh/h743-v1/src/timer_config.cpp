@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2020-2021 PX4 Development Team. All rights reserved.
+ *   Copyright (C) 2021 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,71 +31,27 @@
  *
  ****************************************************************************/
 
-#include <px4_platform_common/getopt.h>
-#include <px4_platform_common/module.h>
+#include <px4_arch/io_timer_hw_description.h>
 
-#include "BMI088.hpp"
+constexpr io_timers_t io_timers[MAX_IO_TIMERS] = {
+	initIOTimer(Timer::Timer1, DMA{DMA::Index1}),
+	initIOTimer(Timer::Timer3, DMA{DMA::Index1}),
+	initIOTimer(Timer::Timer4, DMA{DMA::Index1}),
+	initIOTimer(Timer::Timer15),
+};
 
-void BMI088::print_usage()
-{
-	PRINT_MODULE_USAGE_NAME("bmi088", "driver");
-	PRINT_MODULE_USAGE_SUBCATEGORY("imu");
-	PRINT_MODULE_USAGE_COMMAND("start");
-	PRINT_MODULE_USAGE_PARAM_FLAG('A', "Accel", true);
-	PRINT_MODULE_USAGE_PARAM_FLAG('G', "Gyro", true);
-	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(false, true);
-	PRINT_MODULE_USAGE_PARAM_INT('R', 0, 0, 35, "Rotation", true);
-	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
-}
+constexpr timer_io_channels_t timer_io_channels[MAX_TIMER_IO_CHANNELS] = {
+	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel4}, {GPIO::PortE, GPIO::Pin14}),
+	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel3}, {GPIO::PortE, GPIO::Pin13}),
+	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel2}, {GPIO::PortE, GPIO::Pin11}),
+	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel1}, {GPIO::PortE, GPIO::Pin9}),
+	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::Channel4}, {GPIO::PortB, GPIO::Pin1}),
+	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::Channel3}, {GPIO::PortB, GPIO::Pin0}),
+	initIOTimerChannel(io_timers, {Timer::Timer4, Timer::Channel1}, {GPIO::PortD, GPIO::Pin12}),
+	initIOTimerChannel(io_timers, {Timer::Timer4, Timer::Channel2}, {GPIO::PortD, GPIO::Pin13}),
+	initIOTimerChannel(io_timers, {Timer::Timer15, Timer::Channel1}, {GPIO::PortE, GPIO::Pin5}),
+	initIOTimerChannel(io_timers, {Timer::Timer15, Timer::Channel2}, {GPIO::PortE, GPIO::Pin6}),
+};
 
-extern "C" int bmi088_main(int argc, char *argv[])
-{
-	int ch;
-	using ThisDriver = BMI088;
-	BusCLIArguments cli{false, true};
-	uint16_t type = 0;
-	cli.default_spi_frequency = 1000000;
-	const char *name = MODULE_NAME;
-
-	while ((ch = cli.getOpt(argc, argv, "AGR:")) != EOF) {
-		switch (ch) {
-		case 'A':
-			type = DRV_ACC_DEVTYPE_BMI088;
-			name = MODULE_NAME "_accel";
-			break;
-
-		case 'G':
-			type = DRV_GYR_DEVTYPE_BMI088;
-			name = MODULE_NAME "_gyro";
-			break;
-
-		case 'R':
-			cli.rotation = (enum Rotation)atoi(cli.optArg());
-			break;
-		}
-	}
-
-	const char *verb = cli.optArg();
-
-	if (!verb || type == 0) {
-		ThisDriver::print_usage();
-		return -1;
-	}
-
-	BusInstanceIterator iterator(name, cli, type);
-
-	if (!strcmp(verb, "start")) {
-		return ThisDriver::module_start(cli, iterator);
-	}
-
-	if (!strcmp(verb, "stop")) {
-		return ThisDriver::module_stop(iterator);
-	}
-
-	if (!strcmp(verb, "status")) {
-		return ThisDriver::module_status(iterator);
-	}
-
-	ThisDriver::print_usage();
-	return -1;
-}
+constexpr io_timers_channel_mapping_t io_timers_channel_mapping =
+	initIOTimerChannelMapping(io_timers, timer_io_channels);
