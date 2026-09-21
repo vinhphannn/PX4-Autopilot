@@ -1,10 +1,10 @@
 {
     "board_id": 1179,
     "magic": "PX4FWv1",
-    "description": "Firmware for the MicoAir743v2 board",
+    "description": "Firmware for the Aegis FC v1.0 board",
     "image": "",
     "build_time": 0,
-    "summary": "MicoAir743v2",
+    "summary": "Aegis FC v1.0",
     "version": "0.1",
     "image_size": 0,
     "image_maxsize": 1835008,

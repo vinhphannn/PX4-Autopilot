@@ -32,8 +32,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ************************************************************************************/
-#ifndef __NUTTX_CONFIG_MICOAIR743V2_INCLUDE_BOARD_H
-#define __NUTTX_CONFIG_MICOAIR743V2_INCLUDE_BOARD_H
+#ifndef __NUTTX_CONFIG_AEGIS_FC_V1_INCLUDE_BOARD_H
+#define __NUTTX_CONFIG_AEGIS_FC_V1_INCLUDE_BOARD_H
 
 /************************************************************************************
  * Included Files
@@ -55,7 +55,7 @@
  ************************************************************************************/
 
 /* Clocking *************************************************************************/
-/* The MicoAir743  board provides the following clock sources:
+/* The Aegis FC v1.0 board provides the following clock sources:
  *
  *   X1: 8 MHz crystal for HSE
  *
@@ -414,4 +414,4 @@
 # define PROBE(n,s)
 # define PROBE_MARK(n)
 
-#endif  /*__NUTTX_CONFIG_MICOAIR743V2_INCLUDE_BOARD_H  */
+#endif  /* __NUTTX_CONFIG_AEGIS_FC_V1_INCLUDE_BOARD_H */
