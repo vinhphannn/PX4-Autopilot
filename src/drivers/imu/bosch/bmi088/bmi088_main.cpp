@@ -54,7 +54,7 @@ extern "C" int bmi088_main(int argc, char *argv[])
 	using ThisDriver = BMI088;
 	BusCLIArguments cli{false, true};
 	uint16_t type = 0;
-	cli.default_spi_frequency = 1000000;
+	cli.default_spi_frequency = 10000000;
 	const char *name = MODULE_NAME;
 
 	while ((ch = cli.getOpt(argc, argv, "AGR:")) != EOF) {
