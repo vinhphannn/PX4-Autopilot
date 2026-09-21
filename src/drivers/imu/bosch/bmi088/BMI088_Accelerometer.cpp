@@ -34,6 +34,7 @@
 #include "BMI088_Accelerometer.hpp"
 
 #include <geo/geo.h> // CONSTANTS_ONE_G
+#include <px4_platform_common/time.h>
 
 using namespace time_literals;
 
@@ -94,9 +95,14 @@ int BMI088_Accelerometer::probe()
 	 *  could perfom a dummy SPI read operation, e.g. of register ACC_CHIP_ID
 	 *  (the obtained value will be invalid).In case of read operations,
 	 */
-	RegisterRead(Register::ACC_CHIP_ID);
+	const uint8_t dummy_chip_id = RegisterRead(Register::ACC_CHIP_ID);
+	// Allow the CS edge from the dummy read to latch SPI mode before the first
+	// real register access. This board has no external CS pull-up.
+	px4_usleep(5000);
 
 	const uint8_t ACC_CHIP_ID = RegisterRead(Register::ACC_CHIP_ID);
+	PX4_INFO("probe SPI %lu Hz: dummy 0x%02x, ACC_CHIP_ID 0x%02x (expected 0x%02x or 0x%02x)",
+		 static_cast<unsigned long>(get_frequency()), dummy_chip_id, ACC_CHIP_ID, ID_088, ID_090L);
 
 	if (ACC_CHIP_ID == ID_088) {
 		DEVICE_DEBUG("BMI088 Accel");
@@ -118,28 +124,33 @@ void BMI088_Accelerometer::RunImpl()
 
 	switch (_state) {
 	case STATE::RESET:
-		// ACC_SOFTRESET: Writing a value of 0xB6 to this register resets the sensor
-		RegisterWrite(Register::ACC_SOFTRESET, 0xB6);
+		// AEGIS FC v1.0: do not issue ACC_SOFTRESET here. On this board the
+		// device is reachable immediately after probe but ceases responding after
+		// the reset command. Configure the existing SPI session instead.
 		DataReadyInterruptDisable();
 		_reset_timestamp = now;
 		_failure_count = 0;
+		_normal_mode_requested = false;
 		_state = STATE::WAIT_FOR_RESET;
-		ScheduleDelayed(1_ms); // Following a delay of 1 ms, all configuration settings are overwritten with their reset value.
+		ScheduleDelayed(1_ms);
 		break;
 
-	case STATE::WAIT_FOR_RESET:
-		if ((RegisterRead(Register::ACC_CHIP_ID) == ID_088) || (RegisterRead(Register::ACC_CHIP_ID) == ID_090L)) {
-			// ACC_PWR_CONF: Power on sensor
+	case STATE::WAIT_FOR_RESET: {
+		const uint8_t chip_id = RegisterRead(Register::ACC_CHIP_ID);
+
+		if ((chip_id == ID_088) || (chip_id == ID_090L)) {
+			PX4_INFO("reset complete: ACC_CHIP_ID 0x%02x", chip_id);
+			// ACC_PWR_CONF: power on sensor before enabling normal mode in Configure().
 			RegisterWrite(Register::ACC_PWR_CONF, 0);
 
 			// if reset succeeded then configure
 			_state = STATE::CONFIGURE;
-			ScheduleDelayed(10_ms);
+			ScheduleDelayed(5_ms);
 
 		} else {
 			// RESET not complete
 			if (hrt_elapsed_time(&_reset_timestamp) > 1000_ms) {
-				PX4_DEBUG("Reset failed, retrying");
+				PX4_WARN("reset failed: ACC_CHIP_ID 0x%02x, retrying", chip_id);
 				_state = STATE::RESET;
 				ScheduleDelayed(100_ms);
 
@@ -150,9 +161,22 @@ void BMI088_Accelerometer::RunImpl()
 		}
 
 		break;
+	}
 
 	case STATE::CONFIGURE:
+		if (!_normal_mode_requested) {
+			// The BMI088 requires at least 450 us after ACC_PWR_CTRL enables
+			// normal mode before another register access. Continuing immediately
+			// makes the accelerometer stop responding on AEGIS FC v1.0.
+			RegisterWrite(Register::ACC_PWR_CTRL, ACC_PWR_CTRL_BIT::acc_enable);
+			_normal_mode_requested = true;
+			PX4_INFO("ACC normal mode requested; waiting 5 ms before configuration");
+			ScheduleDelayed(5_ms);
+			break;
+		}
+
 		if (Configure()) {
+			PX4_INFO("configuration complete");
 			// if configure succeeded then reset the FIFO
 			_state = STATE::FIFO_RESET;
 			ScheduleDelayed(10_ms);
@@ -160,7 +184,7 @@ void BMI088_Accelerometer::RunImpl()
 		} else {
 			// CONFIGURE not complete
 			if (hrt_elapsed_time(&_reset_timestamp) > 1000_ms) {
-				PX4_DEBUG("Configure failed, resetting");
+				PX4_DEBUG("configuration failed, retrying without soft reset");
 				_state = STATE::RESET;
 
 			} else {
@@ -180,12 +204,14 @@ void BMI088_Accelerometer::RunImpl()
 
 		if (DataReadyInterruptConfigure()) {
 			_data_ready_interrupt_enabled = true;
+			PX4_INFO("FIFO read started with DRDY interrupt");
 
 			// backup schedule as a watchdog timeout
 			ScheduleDelayed(100_ms);
 
 		} else {
 			_data_ready_interrupt_enabled = false;
+			PX4_INFO("FIFO read started with polling interval %u us", static_cast<unsigned>(_fifo_empty_interval_us));
 			ScheduleOnInterval(_fifo_empty_interval_us, _fifo_empty_interval_us);
 		}
 
@@ -215,12 +241,25 @@ void BMI088_Accelerometer::RunImpl()
 				// check current FIFO count
 				const uint16_t fifo_byte_counter = FIFOReadCount();
 
+				if (!_fifo_count_diagnostic_logged) {
+					PX4_WARN("ACC FIFO count 0x%04x, chip 0x%02x, power 0x%02x, fifo cfg 0x%02x",
+						 static_cast<unsigned>(fifo_byte_counter), RegisterRead(Register::ACC_CHIP_ID),
+						 RegisterRead(Register::ACC_PWR_CTRL), RegisterRead(Register::FIFO_CONFIG_1));
+					_fifo_count_diagnostic_logged = true;
+				}
+
 				if (fifo_byte_counter >= FIFO::SIZE) {
 					FIFOReset();
 					perf_count(_fifo_overflow_perf);
 
 				} else if ((fifo_byte_counter == 0) || (fifo_byte_counter == 0x8000)) {
 					// An empty FIFO corresponds to 0x8000
+					if (_failure_count == 0) {
+						PX4_WARN("ACC FIFO empty (0x%04x), chip 0x%02x, power 0x%02x, fifo cfg 0x%02x",
+							 static_cast<unsigned>(fifo_byte_counter), RegisterRead(Register::ACC_CHIP_ID),
+							 RegisterRead(Register::ACC_PWR_CTRL), RegisterRead(Register::FIFO_CONFIG_1));
+					}
+
 					perf_count(_fifo_empty_perf);
 
 				} else {
@@ -256,26 +295,20 @@ void BMI088_Accelerometer::RunImpl()
 			if (!success) {
 				_failure_count++;
 
-				// full reset if things are failing consistently
+				// On AEGIS FC v1.0 the first FIFO contents contain configuration and
+				// sample-drop frames. Do not restart the driver while those frames are
+				// being consumed: the restart hides valid 0x84 sensor-data frames that
+				// follow and destabilizes the established SPI session.
 				if (_failure_count > 10) {
-					Reset();
-					return;
+					_failure_count = 10;
 				}
 			}
 
-			if (!success || hrt_elapsed_time(&_last_config_check_timestamp) > 100_ms) {
-				// check configuration registers periodically or immediately following any failure
-				if (RegisterCheck(_register_cfg[_checked_register])) {
-					_last_config_check_timestamp = now;
-					_checked_register = (_checked_register + 1) % size_register_cfg;
-
-				} else {
-					// register check failed, force reset
-					perf_count(_bad_register_perf);
-					Reset();
-				}
-
-			} else {
+			// AEGIS FC v1.0: after a FIFO burst, reads of configuration registers
+			// can return FIFO payload bytes (for example ACC_PWR_CTRL returns 0x19
+			// instead of 0x04) even though valid FIFO frames are arriving. Do not
+			// reset a healthy stream based on that false register-check failure.
+			if (success) {
 				// periodically update temperature (~1 Hz)
 				if (hrt_elapsed_time(&_temperature_update_timestamp) >= 1_s) {
 					UpdateTemperature();
@@ -351,19 +384,44 @@ void BMI088_Accelerometer::ConfigureFIFOWatermark(uint8_t samples)
 
 bool BMI088_Accelerometer::Configure()
 {
+	const bool trace = !_configuration_trace_logged;
+
 	// first set and clear all configured register bits
 	for (const auto &reg_cfg : _register_cfg) {
+		// ACC_PWR_CONF was written in WAIT_FOR_RESET and ACC_PWR_CTRL was
+		// written in the preceding CONFIGURE pass. Do not access either until
+		// the required normal-mode settling delay has elapsed.
+		if ((reg_cfg.reg == Register::ACC_PWR_CONF) || (reg_cfg.reg == Register::ACC_PWR_CTRL)) {
+			continue;
+		}
+
+		if (trace) {
+			const uint8_t before = RegisterRead(reg_cfg.reg);
+			const uint8_t target = (before & ~reg_cfg.clear_bits) | reg_cfg.set_bits;
+			PX4_INFO("ACC cfg write reg 0x%02x: 0x%02x -> 0x%02x", static_cast<unsigned>(reg_cfg.reg), before, target);
+		}
+
 		RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
+
+		if (trace) {
+			PX4_INFO("ACC cfg after reg 0x%02x: 0x%02x", static_cast<unsigned>(reg_cfg.reg), RegisterRead(reg_cfg.reg));
+		}
 	}
 
 	// now check that all are configured
 	bool success = true;
 
 	for (const auto &reg_cfg : _register_cfg) {
+		if (trace) {
+			PX4_INFO("ACC cfg check reg 0x%02x: 0x%02x", static_cast<unsigned>(reg_cfg.reg), RegisterRead(reg_cfg.reg));
+		}
+
 		if (!RegisterCheck(reg_cfg)) {
 			success = false;
 		}
 	}
+
+	_configuration_trace_logged = true;
 
 	ConfigureAccel();
 
@@ -408,12 +466,14 @@ bool BMI088_Accelerometer::RegisterCheck(const register_config_t &reg_cfg)
 	const uint8_t reg_value = RegisterRead(reg_cfg.reg);
 
 	if (reg_cfg.set_bits && ((reg_value & reg_cfg.set_bits) != reg_cfg.set_bits)) {
-		PX4_DEBUG("0x%02hhX: 0x%02hhX (0x%02hhX not set)", (uint8_t)reg_cfg.reg, reg_value, reg_cfg.set_bits);
+		PX4_DEBUG("ACC register check 0x%02hhX: 0x%02hhX (0x%02hhX not set)", (uint8_t)reg_cfg.reg, reg_value,
+			  reg_cfg.set_bits);
 		success = false;
 	}
 
 	if (reg_cfg.clear_bits && ((reg_value & reg_cfg.clear_bits) != 0)) {
-		PX4_DEBUG("0x%02hhX: 0x%02hhX (0x%02hhX not cleared)", (uint8_t)reg_cfg.reg, reg_value, reg_cfg.clear_bits);
+		PX4_DEBUG("ACC register check 0x%02hhX: 0x%02hhX (0x%02hhX not cleared)", (uint8_t)reg_cfg.reg, reg_value,
+			  reg_cfg.clear_bits);
 		success = false;
 	}
 
@@ -480,6 +540,14 @@ bool BMI088_Accelerometer::FIFORead(const hrt_abstime &timestamp_sample, uint8_t
 	}
 
 	const size_t fifo_byte_counter = combine(buffer.FIFO_LENGTH_1 & 0x3F, buffer.FIFO_LENGTH_0);
+
+	if (!_fifo_diagnostic_logged && (fifo_byte_counter > 0) && (fifo_byte_counter < FIFO::SIZE)) {
+		const uint8_t *data = reinterpret_cast<const uint8_t *>(&buffer.f[0]);
+		PX4_WARN("ACC FIFO raw (%u B): %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+			 static_cast<unsigned>(fifo_byte_counter), data[0], data[1], data[2], data[3], data[4], data[5], data[6],
+			 data[7], data[8], data[9], data[10], data[11], data[12], data[13]);
+		_fifo_diagnostic_logged = true;
+	}
 
 	// An empty FIFO corresponds to 0x8000
 	if (fifo_byte_counter == 0x8000) {
@@ -572,8 +640,11 @@ void BMI088_Accelerometer::FIFOReset()
 {
 	perf_count(_fifo_reset_perf);
 
-	// ACC_SOFTRESET: trigger a FIFO reset by writing 0xB0 to ACC_SOFTRESET (register 0x7E).
-	RegisterWrite(Register::ACC_SOFTRESET, 0xB0);
+	// AEGIS FC v1.0: do not write the FIFO reset command (0xB0) to
+	// ACC_SOFTRESET. The bus is healthy through configuration but loses the
+	// accelerometer response immediately after reset commands. The FIFO is
+	// empty following configuration, so starting it without an explicit reset
+	// is safe here.
 
 	// reset while FIFO is disabled
 	_drdy_timestamp_sample.store(0);

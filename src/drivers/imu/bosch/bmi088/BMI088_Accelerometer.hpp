@@ -113,7 +113,15 @@ private:
 	uint8_t _fifo_samples{static_cast<uint8_t>(_fifo_empty_interval_us / (1000000 / RATE))};
 
 	uint8_t _checked_register{0};
+	bool _configuration_trace_logged{false};
+	bool _normal_mode_requested{false};
+	bool _fifo_count_diagnostic_logged{false};
+	bool _fifo_diagnostic_logged{false};
+#if defined(CONFIG_BMI088_ACCELEROMETER_INT1) || defined(CONFIG_BMI088_ACCELEROMETER_INT2)
 	static constexpr uint8_t size_register_cfg{10};
+#else
+	static constexpr uint8_t size_register_cfg{8};
+#endif
 	register_config_t _register_cfg[size_register_cfg] {
 		// Register                        | Set bits, Clear bits
 		{ Register::ACC_PWR_CONF,          0, ACC_PWR_CONF_BIT::acc_pwr_save },

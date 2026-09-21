@@ -5,12 +5,13 @@
 
 board_adc start
 
-# # Internal SPI bus BMI088 accel/gyro
-bmi088 -s -b 2 -A -R 6 start
-bmi088 -s -b 2 -G -R 6 start
+# BMI088 validation step: accel FIFO parser/recovery at the proven 1 MHz SPI clock.
+# Keep gyro off until accel publishes valid data.
+bmi088 -s -b 2 -A -R 6 -f 1000 start
+# bmi088 -s -b 2 -G -R 6 -f 1000 start
 
-# # Internal SPI bus BMI270 accel/gyro
-bmi270 -s -b 3 -R 0 start
+# # Internal SPI bus BMI160 accel/gyro (Driver missing in PX4, disabled for now)
+# bmi160 -s -b 3 -R 0 start
 
 # Internal baro
 bmp280 -I -b 2 start
