@@ -102,9 +102,14 @@
 
 
 /* PWM
+ *
+ * The board routes exactly eight actuator outputs. PWM1-PWM4 are the
+ * four outputs on TIM1 and are intentionally first: PX4 bidirectional
+ * DShot can operate on one timer only, so this is the ESC 4-in-1 group.
+ * PWM5-PWM8 are conventional/DShot-capable auxiliary outputs.
  */
-#define DIRECT_PWM_OUTPUT_CHANNELS   10
-#define DIRECT_INPUT_TIMER_CHANNELS  10
+#define DIRECT_PWM_OUTPUT_CHANNELS   8
+#define DIRECT_INPUT_TIMER_CHANNELS  8
 
 #define BOARD_HAS_PWM  DIRECT_PWM_OUTPUT_CHANNELS
 
@@ -152,7 +157,8 @@
 
 #define FLASH_BASED_PARAMS
 
-#define BOARD_NUM_IO_TIMERS 5
+/* Three active timers plus the required zero-initialized terminator. */
+#define BOARD_NUM_IO_TIMERS 4
 
 
 __BEGIN_DECLS

@@ -25,3 +25,11 @@ param set-default MAV_TYPE 2
 param set-default CA_AIRFRAME 0
 param set-default CA_ROTOR_COUNT 4
 param set-default CBRK_SUPPLY_CHK 894281
+
+# A missing removable SD card leaves /fs/microsd as an empty mount point.
+# Avoid writing flight logs to that RAM-backed directory. This only changes
+# the boot-time default: a boot with mounted storage still uses SD logging.
+if [ $STORAGE_AVAILABLE = no ]
+then
+	param set-default SDLOG_MODE -1
+fi

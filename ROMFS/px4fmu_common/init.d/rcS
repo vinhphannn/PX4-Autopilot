@@ -270,8 +270,17 @@ else
 	else
 		if param compare SYS_DM_BACKEND 0
 		then
-			# dataman start default
-			dataman start
+			# The default backend is file-backed when persistent storage is
+			# available. If no SD card (or other storage) could be mounted,
+			# retain mission data in RAM instead of starting dataman with an
+			# unusable /fs/microsd/dataman path. Do not change SYS_DM_BACKEND:
+			# a subsequent boot with storage present will use the file backend.
+			if [ $STORAGE_AVAILABLE = yes ]
+			then
+				dataman start
+			else
+				dataman start -r
+			fi
 		fi
 	fi
 
