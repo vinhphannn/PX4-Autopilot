@@ -1,0 +1,27 @@
+--- boards/aegis/fc-v1/src/init.c
++++ boards/aegis/fc-v1/src/init.c
+@@ -51,6 +51,9 @@
+ #include <arch/board/board.h>
+ #include "arm_internal.h"
+ 
++#include <stm32_pwr.h>
++#include <stm32_rcc.h>
++
+ #include <drivers/drv_hrt.h>
+ #include <drivers/drv_board_led.h>
+ #include <systemlib/px4_macros.h>
+@@ -128,6 +131,14 @@
+ 	const uint32_t gpio[] = PX4_GPIO_INIT_LIST;
+ 	px4_gpio_init(gpio, arraySize(gpio));
+ 
++	/* Unlock Backup Domain to allow configuring PC14 and PC15 as GPIOs */
++	stm32_pwr_enablebkp(true);
++
++	/* Enable SYSCFG clock first */
++	uint32_t rcc_val = getreg32(STM32_RCC_APB4ENR);
++	rcc_val |= (1 << 1); /* RCC_APB4ENR_SYSCFGEN */
++	putreg32(rcc_val, STM32_RCC_APB4ENR);
++
+ 	/* configure SPI interfaces */
+ 	stm32_spiinitialize();
+ 

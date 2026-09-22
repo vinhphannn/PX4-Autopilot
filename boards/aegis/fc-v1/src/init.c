@@ -51,6 +51,9 @@
 #include <nuttx/mmcsd.h>
 #include <arch/board/board.h>
 #include "arm_internal.h"
+#include <stm32_pwr.h>
+#include <stm32_rcc.h>
+#include "hardware/stm32_syscfg.h"
 
 #include <drivers/drv_hrt.h>
 #include <drivers/drv_board_led.h>
@@ -128,6 +131,24 @@ __EXPORT void stm32_boardinitialize(void)
 	/* configure pins */
 	const uint32_t gpio[] = PX4_GPIO_INIT_LIST;
 	px4_gpio_init(gpio, arraySize(gpio));
+
+	/* Unlock Backup Domain to allow configuring PC14 and PC15 as GPIOs */
+	stm32_pwr_enablebkp(true);
+
+	/* Ensure LSE is disabled so PC14 and PC15 can function as GPIOs */
+	uint32_t bdcr = getreg32(STM32_RCC_BDCR);
+	bdcr &= ~RCC_BDCR_LSEON;
+	putreg32(bdcr, STM32_RCC_BDCR);
+
+	/* Enable SYSCFG clock first */
+	uint32_t rcc_val = getreg32(STM32_RCC_APB4ENR);
+	rcc_val |= (1 << 1); /* RCC_APB4ENR_SYSCFGEN */
+	putreg32(rcc_val, STM32_RCC_APB4ENR);
+
+	/* We explicitly DO NOT close PC2/PC3 analog switches here.
+	 * Bare-metal tests show SPI2 MOSI (PC3) works without touching SYSCFG_PMC.
+	 * Closing them might cause conflicts depending on the exact chip package.
+	 */
 
 	/* configure SPI interfaces */
 	stm32_spiinitialize();

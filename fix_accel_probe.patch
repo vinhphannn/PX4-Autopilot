@@ -1,0 +1,10 @@
+--- src/drivers/imu/bosch/bmi088/BMI088_Accelerometer.cpp
++++ src/drivers/imu/bosch/bmi088/BMI088_Accelerometer.cpp
+@@ -95,6 +95,7 @@
+ 	 *  (the obtained value will be invalid).In case of read operations,
+ 	 */
+ 	RegisterRead(Register::ACC_CHIP_ID);
++	up_udelay(5000); // 5ms delay to ensure SPI mode initialization
+ 
+ 	const uint8_t ACC_CHIP_ID = RegisterRead(Register::ACC_CHIP_ID);
+ 
