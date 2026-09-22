@@ -5,10 +5,11 @@
 
 board_adc start
 
-# Recovery: keep both BMI088 instances off while restoring the USB/QGC link.
-# The current checkpoint retains the accel FIFO test configuration.
-bmi088 -s -b 2 -G -R 6 -f 1000 start
-bmi088 -s -b 2 -A -R 6 -f 1000 start
+# BMI088 production baseline: SPI2 DMA polling at 1 MHz, gyro before accel.
+# -R 4 is ROTATION_YAW_180, matching the installed IMU orientation.
+# DRDY remains disabled; see bmi088_analysis.md for measured rationale.
+bmi088 -s -b 2 -G -R 4 -f 1000 start
+bmi088 -s -b 2 -A -R 4 -f 1000 start
 
 # # Internal SPI bus BMI160 accel/gyro (Driver missing in PX4, disabled for now)
 # bmi160 -s -b 3 -R 0 start
