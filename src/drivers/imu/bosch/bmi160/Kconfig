@@ -1,0 +1,5 @@
+menuconfig DRIVERS_IMU_BOSCH_BMI160
+	bool "bosch bmi160"
+	default n
+	---help---
+		Enable support for the Bosch BMI160 SPI IMU.

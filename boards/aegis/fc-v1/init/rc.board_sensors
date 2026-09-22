@@ -11,8 +11,9 @@ board_adc start
 bmi088 -s -b 2 -G -R 4 -f 1000 start
 bmi088 -s -b 2 -A -R 4 -f 1000 start
 
-# # Internal SPI bus BMI160 accel/gyro (Driver missing in PX4, disabled for now)
-# bmi160 -s -b 3 -R 0 start
+# BMI160 redundant IMU: SPI3 DMA polling at 1 MHz.
+# -R 12 is ROTATION_PITCH_180, verified against the BMI088 gravity vector.
+bmi160 -s -b 3 -R 12 -f 1000 start
 
 # Internal baro
 bmp280 -I -b 2 start
