@@ -64,27 +64,22 @@ private:
 
 	// Transfer data
 	struct FIFOTransferBuffer {
-		uint8_t cmd{static_cast<uint8_t>(Register::FIFO_LENGTH_0) | DIR_READ};
+		uint8_t cmd{static_cast<uint8_t>(Register::FIFO_DATA) | DIR_READ};
 		uint8_t dummy{0};
-		uint8_t FIFO_LENGTH_0{0};
-		uint8_t FIFO_LENGTH_1{0};
 		FIFO::DATA f[FIFO_MAX_SAMPLES] {};
 	};
 	// ensure no struct padding
-	static_assert(sizeof(FIFOTransferBuffer) == (4 + FIFO_MAX_SAMPLES *sizeof(FIFO::DATA)));
+	static_assert(sizeof(FIFOTransferBuffer) == (2 + FIFO_MAX_SAMPLES *sizeof(FIFO::DATA)));
 
-	// The FIFO stream starts after FIFO_LENGTH_0, FIFO_LENGTH_1 and one dummy
-	// byte. Keep this buffer in the driver object rather than on the SPI work
+	// Keep this buffer in the driver object rather than on the SPI work
 	// queue stack: a whole FIFO-depth transaction is needed to guarantee that
 	// no variable-length FIFO frame is read only partially.
 	struct FIFOFlushBuffer {
-		uint8_t cmd{static_cast<uint8_t>(Register::FIFO_LENGTH_0) | DIR_READ};
+		uint8_t cmd{static_cast<uint8_t>(Register::FIFO_DATA) | DIR_READ};
 		uint8_t dummy{0};
-		uint8_t FIFO_LENGTH_0{0};
-		uint8_t FIFO_LENGTH_1{0};
 		uint8_t data[FIFO::SIZE] {};
 	};
-	static_assert(sizeof(FIFOFlushBuffer) == (4 + FIFO::SIZE));
+	static_assert(sizeof(FIFOFlushBuffer) == (2 + FIFO::SIZE));
 
 	struct register_config_t {
 		Register reg;

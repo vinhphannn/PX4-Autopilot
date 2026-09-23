@@ -512,22 +512,11 @@ uint16_t BMI088_Accelerometer::FIFOReadCount()
 bool BMI088_Accelerometer::FIFORead(const hrt_abstime &timestamp_sample, uint8_t samples)
 {
 	FIFOTransferBuffer buffer{};
-	const size_t transfer_size = math::min(samples * sizeof(FIFO::DATA) + 4, FIFO::SIZE);
+	const size_t fifo_data_size = math::min(samples * sizeof(FIFO::DATA), sizeof(buffer.f));
+	const size_t transfer_size = fifo_data_size + 2;
 
 	if (transfer((uint8_t *)&buffer, (uint8_t *)&buffer, transfer_size) != PX4_OK) {
 		perf_count(_bad_transfer_perf);
-		return false;
-	}
-
-	const size_t fifo_byte_counter = combine(buffer.FIFO_LENGTH_1 & 0x3F, buffer.FIFO_LENGTH_0);
-
-	// An empty FIFO corresponds to 0x8000
-	if (fifo_byte_counter == 0x8000) {
-		perf_count(_fifo_empty_perf);
-		return false;
-
-	} else if (fifo_byte_counter >= FIFO::SIZE) {
-		perf_count(_fifo_overflow_perf);
 		return false;
 	}
 
@@ -540,12 +529,16 @@ bool BMI088_Accelerometer::FIFORead(const hrt_abstime &timestamp_sample, uint8_t
 	uint8_t *data_buffer = (uint8_t *)&buffer.f[0];
 	unsigned fifo_buffer_index = 0; // start of buffer
 
-	while (fifo_buffer_index < math::min(fifo_byte_counter, transfer_size - 4)) {
+	while (fifo_buffer_index < fifo_data_size) {
 		// look for header signature (first 6 bits) followed by two bits indicating the status of INT1 and INT2
 		switch (data_buffer[fifo_buffer_index] & 0xFC) {
 		case FIFO::header::sensor_data_frame: {
 				// Acceleration sensor data frame
 				// Frame length: 7 bytes (1 byte header + 6 bytes payload)
+				if ((fifo_buffer_index + sizeof(FIFO::DATA)) > fifo_data_size) {
+					fifo_buffer_index = fifo_data_size;
+					break;
+				}
 
 				FIFO::DATA *fifo_sample = (FIFO::DATA *)&data_buffer[fifo_buffer_index];
 				const int16_t accel_x = combine(fifo_sample->ACC_X_MSB, fifo_sample->ACC_X_LSB);
@@ -566,6 +559,11 @@ bool BMI088_Accelerometer::FIFORead(const hrt_abstime &timestamp_sample, uint8_t
 		case FIFO::header::skip_frame:
 			// Skip Frame
 			// Frame length: 2 bytes (1 byte header + 1 byte payload)
+			if ((fifo_buffer_index + 2) > fifo_data_size) {
+				fifo_buffer_index = fifo_data_size;
+				break;
+			}
+
 			PX4_DEBUG("Skip Frame");
 			fifo_buffer_index += 2;
 			break;
@@ -573,6 +571,11 @@ bool BMI088_Accelerometer::FIFORead(const hrt_abstime &timestamp_sample, uint8_t
 		case FIFO::header::sensor_time_frame:
 			// Sensortime Frame
 			// Frame length: 4 bytes (1 byte header + 3 bytes payload)
+			if ((fifo_buffer_index + 4) > fifo_data_size) {
+				fifo_buffer_index = fifo_data_size;
+				break;
+			}
+
 			PX4_DEBUG("Sensortime Frame");
 			fifo_buffer_index += 4;
 			break;
@@ -580,6 +583,11 @@ bool BMI088_Accelerometer::FIFORead(const hrt_abstime &timestamp_sample, uint8_t
 		case FIFO::header::FIFO_input_config_frame:
 			// FIFO input config Frame
 			// Frame length: 2 bytes (1 byte header + 1 byte payload)
+			if ((fifo_buffer_index + 2) > fifo_data_size) {
+				fifo_buffer_index = fifo_data_size;
+				break;
+			}
+
 			PX4_DEBUG("FIFO input config Frame");
 			fifo_buffer_index += 2;
 			break;
@@ -587,6 +595,11 @@ bool BMI088_Accelerometer::FIFORead(const hrt_abstime &timestamp_sample, uint8_t
 		case FIFO::header::sample_drop_frame:
 			// Sample drop Frame
 			// Frame length: 2 bytes (1 byte header + 1 byte payload)
+			if ((fifo_buffer_index + 2) > fifo_data_size) {
+				fifo_buffer_index = fifo_data_size;
+				break;
+			}
+
 			PX4_DEBUG("Sample drop Frame");
 			fifo_buffer_index += 2;
 			break;
@@ -618,20 +631,42 @@ bool BMI088_Accelerometer::FIFOFlush()
 
 	// FIFO frames can be 2, 4, or 7 bytes. The BMI088 repeats any frame that
 	// is read only partly, so splitting a drain into fixed-size chunks can leave
-	// the FIFO perpetually non-empty. A single 1024-byte burst is at least one
-	// full FIFO depth and ends only after all frames present at its start have
-	// been consumed. The SPI2 DMA buffer is 2048 bytes; this is a startup-only
-	// transaction and does not affect steady-state polling load.
-	_fifo_flush_buffer.cmd = static_cast<uint8_t>(Register::FIFO_LENGTH_0) | DIR_READ;
+	// the FIFO perpetually non-empty. The FIFO count is read separately, then
+	// data is burst directly from FIFO_DATA as required by the device.
+	//
+	// A full-depth burst may still leave a few frames, because it takes ~8 ms at
+	// 1 MHz while the sensor is continuing to write. Finish with a small burst
+	// that is longer than the remaining data. SPI2 has a 2048-byte DMA buffer;
+	// this recovery-only work is not in the steady-state sampling path.
+	auto drain = [this](size_t fifo_bytes) {
+		_fifo_flush_buffer.cmd = static_cast<uint8_t>(Register::FIFO_DATA) | DIR_READ;
+		return transfer(reinterpret_cast<uint8_t *>(&_fifo_flush_buffer),
+				reinterpret_cast<uint8_t *>(&_fifo_flush_buffer), fifo_bytes + 2) == PX4_OK;
+	};
 
-	if (transfer(reinterpret_cast<uint8_t *>(&_fifo_flush_buffer), reinterpret_cast<uint8_t *>(&_fifo_flush_buffer),
-		     sizeof(_fifo_flush_buffer)) != PX4_OK) {
+	const size_t first_drain_bytes = (fifo_byte_counter > FIFO_MAX_SAMPLES * sizeof(FIFO::DATA))
+						 ? FIFO::SIZE : FIFO_MAX_SAMPLES * sizeof(FIFO::DATA);
+
+	if (!drain(first_drain_bytes)) {
 		perf_count(_bad_transfer_perf);
 		return false;
 	}
 
-	const uint16_t fifo_byte_counter_after = FIFOReadCount();
-	const uint16_t bytes_remaining = (fifo_byte_counter_after == 0x8000) ? 0 : fifo_byte_counter_after;
+	uint16_t fifo_byte_counter_after = FIFOReadCount();
+	uint16_t bytes_remaining = (fifo_byte_counter_after == 0x8000) ? 0 : fifo_byte_counter_after;
+
+	if (bytes_remaining > 0) {
+		const size_t finish_drain_bytes = (bytes_remaining <= 200)
+							 ? FIFO_MAX_SAMPLES * sizeof(FIFO::DATA) : FIFO::SIZE;
+
+		if (!drain(finish_drain_bytes)) {
+			perf_count(_bad_transfer_perf);
+			return false;
+		}
+
+		fifo_byte_counter_after = FIFOReadCount();
+		bytes_remaining = (fifo_byte_counter_after == 0x8000) ? 0 : fifo_byte_counter_after;
+	}
 
 	// A software reboot leaves the sensor powered and can leave almost its
 	// entire FIFO full. Make this distinct from normal startup without adding
