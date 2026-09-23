@@ -71,6 +71,15 @@ private:
 	// ensure no struct padding
 	static_assert(sizeof(FIFOTransferBuffer) == (4 + FIFO_MAX_SAMPLES *sizeof(FIFO::DATA)));
 
+	// Reading FIFO_DATA removes data from the BMI088 FIFO. This is used to
+	// discard data that survived an MCU-only reset without issuing ACC_SOFTRESET.
+	struct FIFOFlushBuffer {
+		uint8_t cmd{static_cast<uint8_t>(Register::FIFO_DATA) | DIR_READ};
+		uint8_t dummy{0};
+		uint8_t data[FIFO_MAX_SAMPLES * sizeof(FIFO::DATA)] {};
+	};
+	static_assert(sizeof(FIFOFlushBuffer) == (2 + FIFO_MAX_SAMPLES *sizeof(FIFO::DATA)));
+
 	struct register_config_t {
 		Register reg;
 		uint8_t set_bits{0};
@@ -97,6 +106,7 @@ private:
 
 	uint16_t FIFOReadCount();
 	bool FIFORead(const hrt_abstime &timestamp_sample, uint8_t samples);
+	bool FIFOFlush();
 	void FIFOReset();
 
 	void UpdateTemperature();

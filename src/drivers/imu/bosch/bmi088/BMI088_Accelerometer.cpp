@@ -636,17 +636,53 @@ bool BMI088_Accelerometer::FIFORead(const hrt_abstime &timestamp_sample, uint8_t
 	return false;
 }
 
+bool BMI088_Accelerometer::FIFOFlush()
+{
+	const uint16_t fifo_byte_counter = FIFOReadCount();
+
+	if ((fifo_byte_counter == 0) || (fifo_byte_counter == 0x8000)) {
+		return true;
+	}
+
+	// The FIFO is physically 1024 bytes. A larger value is not usable data but
+	// can still be recovered by consuming one complete FIFO depth.
+	uint16_t bytes_remaining = math::min(fifo_byte_counter, static_cast<uint16_t>(FIFO::SIZE));
+	const uint16_t bytes_to_discard = bytes_remaining;
+
+	while (bytes_remaining > 0) {
+		FIFOFlushBuffer buffer{};
+		const uint16_t bytes_this_transfer = math::min(bytes_remaining, static_cast<uint16_t>(sizeof(buffer.data)));
+
+		if (transfer(reinterpret_cast<uint8_t *>(&buffer), reinterpret_cast<uint8_t *>(&buffer),
+			     bytes_this_transfer + 2) != PX4_OK) {
+			perf_count(_bad_transfer_perf);
+			return false;
+		}
+
+		bytes_remaining -= bytes_this_transfer;
+	}
+
+	// A software reboot leaves the sensor powered and can leave almost its
+	// entire FIFO full. Make this distinct from normal startup without adding
+	// any logging or work to the steady-state sampling path.
+	if (bytes_to_discard > FIFO_MAX_SAMPLES * sizeof(FIFO::DATA)) {
+		PX4_INFO("ACC discarded %u stale FIFO bytes after MCU reset", static_cast<unsigned>(bytes_to_discard));
+	}
+
+	return true;
+}
+
 void BMI088_Accelerometer::FIFOReset()
 {
 	perf_count(_fifo_reset_perf);
 
-	// AEGIS FC v1.0: do not write the FIFO reset command (0xB0) to
-	// ACC_SOFTRESET. The bus is healthy through configuration but loses the
-	// accelerometer response immediately after reset commands. The FIFO is
-	// empty following configuration, so starting it without an explicit reset
-	// is safe here.
+	// PX4 normally writes 0xB0 to ACC_SOFTRESET here. On AEGIS FC v1.0 that
+	// command can make the accelerometer stop responding. Draining FIFO_DATA
+	// has the same FIFO-clearing effect while leaving the sensor configuration
+	// and its SPI session intact. This matters after an MCU-only reboot, where
+	// the powered sensor retains samples from before the reboot.
+	FIFOFlush();
 
-	// reset while FIFO is disabled
 	_drdy_timestamp_sample.store(0);
 }
 
