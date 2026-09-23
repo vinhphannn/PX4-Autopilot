@@ -123,7 +123,6 @@ private:
 	perf_counter_t _drdy_missed_perf{nullptr};
 
 	uint8_t _fifo_samples{static_cast<uint8_t>(_fifo_empty_interval_us / (1000000 / RATE))};
-	uint8_t _consecutive_invalid_fifo_count{0};
 	FIFOFlushBuffer _fifo_flush_buffer{};
 
 	bool _normal_mode_requested{false};
