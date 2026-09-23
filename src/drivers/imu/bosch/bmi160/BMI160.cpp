@@ -39,6 +39,7 @@ BMI160::~BMI160()
 	perf_free(_chip_id_read_perf);
 	perf_free(_sample_perf);
 	perf_free(_good_transfer_perf);
+	perf_free(_recovery_perf);
 }
 
 int BMI160::init()
@@ -115,6 +116,25 @@ int16_t BMI160::ParseInt16(const uint8_t *data)
 	return static_cast<int16_t>(static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8));
 }
 
+void BMI160::Restart()
+{
+	const hrt_abstime now = hrt_absolute_time();
+
+	if ((_last_recovery_timestamp != 0)
+	    && (hrt_elapsed_time(&_last_recovery_timestamp) <= RecoveryCooldownUs)) {
+		return;
+	}
+
+	_last_recovery_timestamp = now;
+	_consecutive_transfer_failures = 0;
+	_state = State::CONFIGURE_ACCEL;
+	perf_count(_recovery_perf);
+	PX4_WARN("data timeout, reconfiguring");
+
+	ScheduleClear();
+	ScheduleDelayed(100_ms);
+}
+
 void BMI160::RunImpl()
 {
 	switch (_state) {
@@ -183,8 +203,15 @@ void BMI160::RunImpl()
 		if (transfer(reinterpret_cast<uint8_t *>(&buffer), reinterpret_cast<uint8_t *>(&buffer), sizeof(buffer)) != PX4_OK) {
 			perf_count(_bad_transfer_perf);
 			perf_end(_sample_perf);
+
+			if (++_consecutive_transfer_failures >= TransferFailureLimit) {
+				Restart();
+			}
+
 			break;
 		}
+
+		_consecutive_transfer_failures = 0;
 
 		const int16_t gyro_x = ParseInt16(&buffer.data[0]);
 		const int16_t gyro_y = ParseInt16(&buffer.data[2]);
@@ -214,4 +241,5 @@ void BMI160::print_status()
 	perf_print_counter(_chip_id_read_perf);
 	perf_print_counter(_sample_perf);
 	perf_print_counter(_good_transfer_perf);
+	perf_print_counter(_recovery_perf);
 }

@@ -21,6 +21,7 @@
 
 #pragma once
 
+#include <drivers/drv_hrt.h>
 #include <lib/drivers/device/spi.h>
 #include <lib/drivers/accelerometer/PX4Accelerometer.hpp>
 #include <lib/drivers/gyroscope/PX4Gyroscope.hpp>
@@ -56,6 +57,8 @@ private:
 	static constexpr uint8_t GyroConfig800Hz{0x2B};
 	static constexpr uint8_t GyroRange2000Dps{0x00};
 	static constexpr uint32_t SampleIntervalUs{1'250};
+	static constexpr uint16_t TransferFailureLimit{80}; // 100 ms at 800 Hz
+	static constexpr hrt_abstime RecoveryCooldownUs{1000000};
 
 	enum class State : uint8_t {
 		CONFIGURE_ACCEL,
@@ -74,9 +77,12 @@ private:
 	int probe() override;
 	bool RegisterRead(uint8_t reg, uint8_t &value);
 	bool RegisterWrite(uint8_t reg, uint8_t value);
+	void Restart();
 	static int16_t ParseInt16(const uint8_t *data);
 
 	State _state{State::CONFIGURE_ACCEL};
+	uint16_t _consecutive_transfer_failures{0};
+	hrt_abstime _last_recovery_timestamp{0};
 	PX4Accelerometer _px4_accel;
 	PX4Gyroscope _px4_gyro;
 
@@ -84,4 +90,5 @@ private:
 	perf_counter_t _chip_id_read_perf{perf_alloc(PC_COUNT, MODULE_NAME ": chip ID read")};
 	perf_counter_t _sample_perf{perf_alloc(PC_ELAPSED, MODULE_NAME ": read")};
 	perf_counter_t _good_transfer_perf{perf_alloc(PC_COUNT, MODULE_NAME ": good transfer")};
+	perf_counter_t _recovery_perf{perf_alloc(PC_COUNT, MODULE_NAME ": recovery")};
 };

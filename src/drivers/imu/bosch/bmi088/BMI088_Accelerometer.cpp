@@ -59,6 +59,7 @@ BMI088_Accelerometer::~BMI088_Accelerometer()
 	perf_free(_fifo_empty_perf);
 	perf_free(_fifo_overflow_perf);
 	perf_free(_fifo_reset_perf);
+	perf_free(_recovery_perf);
 	perf_free(_drdy_missed_perf);
 }
 
@@ -79,6 +80,7 @@ void BMI088_Accelerometer::print_status()
 	perf_print_counter(_fifo_empty_perf);
 	perf_print_counter(_fifo_overflow_perf);
 	perf_print_counter(_fifo_reset_perf);
+	perf_print_counter(_recovery_perf);
 	perf_print_counter(_drdy_missed_perf);
 }
 
@@ -101,7 +103,7 @@ int BMI088_Accelerometer::probe()
 	px4_usleep(5000);
 
 	const uint8_t ACC_CHIP_ID = RegisterRead(Register::ACC_CHIP_ID);
-	PX4_INFO("probe SPI %lu Hz: dummy 0x%02x, ACC_CHIP_ID 0x%02x (expected 0x%02x or 0x%02x)",
+	PX4_DEBUG("probe SPI %lu Hz: dummy 0x%02x, ACC_CHIP_ID 0x%02x (expected 0x%02x or 0x%02x)",
 		 static_cast<unsigned long>(get_frequency()), dummy_chip_id, ACC_CHIP_ID, ID_088, ID_090L);
 
 	if (ACC_CHIP_ID == ID_088) {
@@ -139,7 +141,7 @@ void BMI088_Accelerometer::RunImpl()
 		const uint8_t chip_id = RegisterRead(Register::ACC_CHIP_ID);
 
 		if ((chip_id == ID_088) || (chip_id == ID_090L)) {
-			PX4_INFO("reset complete: ACC_CHIP_ID 0x%02x", chip_id);
+			PX4_DEBUG("reset complete: ACC_CHIP_ID 0x%02x", chip_id);
 			// ACC_PWR_CONF: power on sensor before enabling normal mode in Configure().
 			RegisterWrite(Register::ACC_PWR_CONF, 0);
 
@@ -170,13 +172,12 @@ void BMI088_Accelerometer::RunImpl()
 			// makes the accelerometer stop responding on AEGIS FC v1.0.
 			RegisterWrite(Register::ACC_PWR_CTRL, ACC_PWR_CTRL_BIT::acc_enable);
 			_normal_mode_requested = true;
-			PX4_INFO("ACC normal mode requested; waiting 5 ms before configuration");
+			PX4_DEBUG("ACC normal mode requested; waiting 5 ms before configuration");
 			ScheduleDelayed(5_ms);
 			break;
 		}
 
 		if (Configure()) {
-			PX4_INFO("configuration complete");
 			// if configure succeeded then reset the FIFO
 			_state = STATE::FIFO_RESET;
 			ScheduleDelayed(10_ms);
@@ -201,6 +202,7 @@ void BMI088_Accelerometer::RunImpl()
 		_state = STATE::FIFO_READ;
 
 		FIFOReset();
+		_last_success_timestamp = now;
 
 		if (DataReadyInterruptConfigure()) {
 			_data_ready_interrupt_enabled = true;
@@ -241,25 +243,13 @@ void BMI088_Accelerometer::RunImpl()
 				// check current FIFO count
 				const uint16_t fifo_byte_counter = FIFOReadCount();
 
-				if (!_fifo_count_diagnostic_logged) {
-					PX4_WARN("ACC FIFO count 0x%04x, chip 0x%02x, power 0x%02x, fifo cfg 0x%02x",
-						 static_cast<unsigned>(fifo_byte_counter), RegisterRead(Register::ACC_CHIP_ID),
-						 RegisterRead(Register::ACC_PWR_CTRL), RegisterRead(Register::FIFO_CONFIG_1));
-					_fifo_count_diagnostic_logged = true;
-				}
-
 				if (fifo_byte_counter >= FIFO::SIZE) {
+					PX4_WARN("ACC FIFO overflow (%u bytes), discarding", static_cast<unsigned>(fifo_byte_counter));
 					FIFOReset();
 					perf_count(_fifo_overflow_perf);
 
 				} else if ((fifo_byte_counter == 0) || (fifo_byte_counter == 0x8000)) {
 					// An empty FIFO corresponds to 0x8000
-					if (_failure_count == 0) {
-						PX4_WARN("ACC FIFO empty (0x%04x), chip 0x%02x, power 0x%02x, fifo cfg 0x%02x",
-							 static_cast<unsigned>(fifo_byte_counter), RegisterRead(Register::ACC_CHIP_ID),
-							 RegisterRead(Register::ACC_PWR_CTRL), RegisterRead(Register::FIFO_CONFIG_1));
-					}
-
 					perf_count(_fifo_empty_perf);
 
 				} else {
@@ -295,12 +285,17 @@ void BMI088_Accelerometer::RunImpl()
 			if (!success) {
 				_failure_count++;
 
-				// On AEGIS FC v1.0 the first FIFO contents contain configuration and
-				// sample-drop frames. Do not restart the driver while those frames are
-				// being consumed: the restart hides valid 0x84 sensor-data frames that
-				// follow and destabilizes the established SPI session.
-				if (_failure_count > 10) {
-					_failure_count = 10;
+				// A short no-data period is expected after FIFO setup. Once the
+				// stream has been absent for long enough, rerun the known-good
+				// configuration sequence instead of leaving a failed sensor silent.
+				if ((hrt_elapsed_time(&_last_success_timestamp) > DATA_TIMEOUT_US)
+				    && ((_last_recovery_timestamp == 0)
+					|| (hrt_elapsed_time(&_last_recovery_timestamp) > RECOVERY_COOLDOWN_US))) {
+					_last_recovery_timestamp = now;
+					perf_count(_recovery_perf);
+					PX4_WARN("ACC data timeout, reconfiguring");
+					Reset();
+					return;
 				}
 			}
 
@@ -309,6 +304,9 @@ void BMI088_Accelerometer::RunImpl()
 			// instead of 0x04) even though valid FIFO frames are arriving. Do not
 			// reset a healthy stream based on that false register-check failure.
 			if (success) {
+				_failure_count = 0;
+				_last_success_timestamp = now;
+
 				// periodically update temperature (~1 Hz)
 				if (hrt_elapsed_time(&_temperature_update_timestamp) >= 1_s) {
 					UpdateTemperature();
@@ -384,8 +382,6 @@ void BMI088_Accelerometer::ConfigureFIFOWatermark(uint8_t samples)
 
 bool BMI088_Accelerometer::Configure()
 {
-	const bool trace = !_configuration_trace_logged;
-
 	// first set and clear all configured register bits
 	for (const auto &reg_cfg : _register_cfg) {
 		// ACC_PWR_CONF was written in WAIT_FOR_RESET and ACC_PWR_CTRL was
@@ -395,33 +391,17 @@ bool BMI088_Accelerometer::Configure()
 			continue;
 		}
 
-		if (trace) {
-			const uint8_t before = RegisterRead(reg_cfg.reg);
-			const uint8_t target = (before & ~reg_cfg.clear_bits) | reg_cfg.set_bits;
-			PX4_INFO("ACC cfg write reg 0x%02x: 0x%02x -> 0x%02x", static_cast<unsigned>(reg_cfg.reg), before, target);
-		}
-
 		RegisterSetAndClearBits(reg_cfg.reg, reg_cfg.set_bits, reg_cfg.clear_bits);
-
-		if (trace) {
-			PX4_INFO("ACC cfg after reg 0x%02x: 0x%02x", static_cast<unsigned>(reg_cfg.reg), RegisterRead(reg_cfg.reg));
-		}
 	}
 
 	// now check that all are configured
 	bool success = true;
 
 	for (const auto &reg_cfg : _register_cfg) {
-		if (trace) {
-			PX4_INFO("ACC cfg check reg 0x%02x: 0x%02x", static_cast<unsigned>(reg_cfg.reg), RegisterRead(reg_cfg.reg));
-		}
-
 		if (!RegisterCheck(reg_cfg)) {
 			success = false;
 		}
 	}
-
-	_configuration_trace_logged = true;
 
 	ConfigureAccel();
 
@@ -541,14 +521,6 @@ bool BMI088_Accelerometer::FIFORead(const hrt_abstime &timestamp_sample, uint8_t
 
 	const size_t fifo_byte_counter = combine(buffer.FIFO_LENGTH_1 & 0x3F, buffer.FIFO_LENGTH_0);
 
-	if (!_fifo_diagnostic_logged && (fifo_byte_counter > 0) && (fifo_byte_counter < FIFO::SIZE)) {
-		const uint8_t *data = reinterpret_cast<const uint8_t *>(&buffer.f[0]);
-		PX4_WARN("ACC FIFO raw (%u B): %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
-			 static_cast<unsigned>(fifo_byte_counter), data[0], data[1], data[2], data[3], data[4], data[5], data[6],
-			 data[7], data[8], data[9], data[10], data[11], data[12], data[13]);
-		_fifo_diagnostic_logged = true;
-	}
-
 	// An empty FIFO corresponds to 0x8000
 	if (fifo_byte_counter == 0x8000) {
 		perf_count(_fifo_empty_perf);
@@ -654,7 +626,7 @@ bool BMI088_Accelerometer::FIFOFlush()
 		const uint16_t bytes_this_transfer = math::min(bytes_remaining, static_cast<uint16_t>(sizeof(buffer.data)));
 
 		if (transfer(reinterpret_cast<uint8_t *>(&buffer), reinterpret_cast<uint8_t *>(&buffer),
-			     bytes_this_transfer + 2) != PX4_OK) {
+			     bytes_this_transfer + 4) != PX4_OK) {
 			perf_count(_bad_transfer_perf);
 			return false;
 		}

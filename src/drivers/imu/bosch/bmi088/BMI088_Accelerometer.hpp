@@ -57,6 +57,8 @@ private:
 	// Sensor Configuration
 	static constexpr uint32_t RATE{1600}; // 1600 Hz
 	static constexpr float FIFO_SAMPLE_DT{1e6f / RATE};
+	static constexpr hrt_abstime DATA_TIMEOUT_US{100000};
+	static constexpr hrt_abstime RECOVERY_COOLDOWN_US{1000000};
 
 	static constexpr int32_t FIFO_MAX_SAMPLES{math::min(FIFO::SIZE / sizeof(FIFO::DATA), sizeof(sensor_accel_fifo_s::x) / sizeof(sensor_accel_fifo_s::x[0]))};
 
@@ -71,14 +73,17 @@ private:
 	// ensure no struct padding
 	static_assert(sizeof(FIFOTransferBuffer) == (4 + FIFO_MAX_SAMPLES *sizeof(FIFO::DATA)));
 
-	// Reading FIFO_DATA removes data from the BMI088 FIFO. This is used to
-	// discard data that survived an MCU-only reset without issuing ACC_SOFTRESET.
+	// The FIFO stream starts after FIFO_LENGTH_0, FIFO_LENGTH_1 and one dummy
+	// byte. Using this same framing as FIFORead() removes data from the FIFO
+	// without issuing ACC_SOFTRESET.
 	struct FIFOFlushBuffer {
-		uint8_t cmd{static_cast<uint8_t>(Register::FIFO_DATA) | DIR_READ};
+		uint8_t cmd{static_cast<uint8_t>(Register::FIFO_LENGTH_0) | DIR_READ};
 		uint8_t dummy{0};
+		uint8_t FIFO_LENGTH_0{0};
+		uint8_t FIFO_LENGTH_1{0};
 		uint8_t data[FIFO_MAX_SAMPLES * sizeof(FIFO::DATA)] {};
 	};
-	static_assert(sizeof(FIFOFlushBuffer) == (2 + FIFO_MAX_SAMPLES *sizeof(FIFO::DATA)));
+	static_assert(sizeof(FIFOFlushBuffer) == (4 + FIFO_MAX_SAMPLES *sizeof(FIFO::DATA)));
 
 	struct register_config_t {
 		Register reg;
@@ -118,15 +123,14 @@ private:
 	perf_counter_t _fifo_empty_perf{perf_alloc(PC_COUNT, MODULE_NAME"_accel: FIFO empty")};
 	perf_counter_t _fifo_overflow_perf{perf_alloc(PC_COUNT, MODULE_NAME"_accel: FIFO overflow")};
 	perf_counter_t _fifo_reset_perf{perf_alloc(PC_COUNT, MODULE_NAME"_accel: FIFO reset")};
+	perf_counter_t _recovery_perf{perf_alloc(PC_COUNT, MODULE_NAME"_accel: recovery")};
 	perf_counter_t _drdy_missed_perf{nullptr};
 
 	uint8_t _fifo_samples{static_cast<uint8_t>(_fifo_empty_interval_us / (1000000 / RATE))};
 
-	uint8_t _checked_register{0};
-	bool _configuration_trace_logged{false};
 	bool _normal_mode_requested{false};
-	bool _fifo_count_diagnostic_logged{false};
-	bool _fifo_diagnostic_logged{false};
+	hrt_abstime _last_success_timestamp{0};
+	hrt_abstime _last_recovery_timestamp{0};
 #if defined(CONFIG_BMI088_ACCELEROMETER_INT1) || defined(CONFIG_BMI088_ACCELEROMETER_INT2)
 	static constexpr uint8_t size_register_cfg{10};
 #else
