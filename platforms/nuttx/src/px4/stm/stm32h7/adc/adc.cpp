@@ -97,7 +97,8 @@
 
 #define ADC_MAX_FADC 36000000
 
-#define ADC3_INTERNAL_TEMP_SENSOR_CHANNEL 18 //define to map the internal temperature channel.
+#define ADC3_INTERNAL_TEMP_SENSOR_CHANNEL 18
+#define ADC3_INTERNAL_VREFINT_CHANNEL     19
 
 
 /****************************************************************************
@@ -334,10 +335,22 @@ int px4_arch_adc_init(uint32_t base_address)
 	}
 
 
-	/* arbitrarily configure all channels for 64.5 cycle sample time */
+	/* Configure all channels for 64.5-cycle sample time. */
 
 	rSMPR1(base_address) = ADC_SMPR1_DEFAULT;
 	rSMPR2(base_address) = ADC_SMPR2_DEFAULT;
+
+	if (base_address == STM32_ADC3_BASE) {
+		/*
+		 * VSENSE and VREFINT are high-impedance internal sources. The default
+		 * 64.5-cycle sampling time is about 3 us at the configured ADC clock,
+		 * shorter than the STM32H743 temperature-sensor requirement. Use the
+		 * longest setting only for the two internal ADC3 channels.
+		 */
+		rSMPR2(base_address) = (rSMPR2(base_address) & ~(ADC_SMPR2_SMP18_MASK | ADC_SMPR2_SMP19_MASK)) |
+					  (ADC_SMPR_810p5 << ADC_SMPR2_SMP18_SHIFT) |
+					  (ADC_SMPR_810p5 << ADC_SMPR2_SMP19_SHIFT);
+	}
 
 
 	/* Set CFGR configuration
@@ -386,11 +399,13 @@ uint32_t px4_arch_adc_sample(uint32_t base_address, unsigned channel)
 {
 	irqstate_t flags = px4_enter_critical_section();
 
-	/* Add a channel mapping for ADC3 on the H7 */
+	/* Map logical board-ADC channels to the ADC3 internal sources on the H7. */
 
-	if (channel == PX4_ADC_INTERNAL_TEMP_SENSOR_CHANNEL) {
+	if ((channel == PX4_ADC_INTERNAL_TEMP_SENSOR_CHANNEL)
+	    || (channel == PX4_ADC_INTERNAL_VREFINT_CHANNEL)) {
 		static bool once = false;
-		channel = ADC3_INTERNAL_TEMP_SENSOR_CHANNEL;
+		channel = (channel == PX4_ADC_INTERNAL_TEMP_SENSOR_CHANNEL) ?
+			  ADC3_INTERNAL_TEMP_SENSOR_CHANNEL : ADC3_INTERNAL_VREFINT_CHANNEL;
 		base_address = STM32_ADC3_BASE;
 
 		// Init it once (px4_arch_adc_init does this as well, but this is less cycles)

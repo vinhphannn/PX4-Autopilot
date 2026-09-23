@@ -81,6 +81,11 @@ public:
 
 	int test();
 
+#if defined(CONFIG_ARCH_CHIP_STM32H7)
+	/** Print the STM32H7 factory-calibrated die-temperature estimate. */
+	int print_temperature();
+#endif
+
 private:
 
 	void		Run() override;

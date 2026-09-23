@@ -357,6 +357,44 @@ int ADC::test()
 	}
 }
 
+#if defined(CONFIG_ARCH_CHIP_STM32H7)
+int ADC::print_temperature()
+{
+	// STM32H743 factory calibration data, measured at VDDA = 3.3 V.
+	constexpr uintptr_t ts_cal1_address = 0x1FF1E820; // 30 degC
+	constexpr uintptr_t ts_cal2_address = 0x1FF1E840; // 110 degC
+	constexpr uintptr_t vrefint_cal_address = 0x1FF1E860;
+	constexpr float calibration_vdda = 3.3f;
+
+	const uint32_t temperature_raw = sample(PX4_ADC_INTERNAL_TEMP_SENSOR_CHANNEL);
+	const uint32_t vrefint_raw = sample(PX4_ADC_INTERNAL_VREFINT_CHANNEL);
+
+	if ((temperature_raw == UINT32_MAX) || (vrefint_raw == UINT32_MAX) || (vrefint_raw == 0)) {
+		PX4_ERR("STM32H7 internal ADC read failed");
+		return PX4_ERROR;
+	}
+
+	const uint16_t ts_cal1 = *reinterpret_cast<volatile const uint16_t *>(ts_cal1_address);
+	const uint16_t ts_cal2 = *reinterpret_cast<volatile const uint16_t *>(ts_cal2_address);
+	const uint16_t vrefint_cal = *reinterpret_cast<volatile const uint16_t *>(vrefint_cal_address);
+
+	if ((ts_cal2 <= ts_cal1) || (vrefint_cal == 0) || (vrefint_cal == UINT16_MAX)) {
+		PX4_ERR("invalid STM32H7 factory calibration data");
+		return PX4_ERROR;
+	}
+
+	const float vdda = calibration_vdda * (float)vrefint_cal / (float)vrefint_raw;
+	const float temperature_at_calibration_vdda = (float)temperature_raw * vdda / calibration_vdda;
+	const float temperature_c = 30.f + (temperature_at_calibration_vdda - (float)ts_cal1) * 80.f /
+						  ((float)ts_cal2 - (float)ts_cal1);
+
+	PX4_INFO_RAW("STM32H7 die temperature: %.1f C (VDDA %.3f V)\n", (double)temperature_c, (double)vdda);
+	PX4_INFO_RAW("raw: temp %" PRIu32 ", VREFINT %" PRIu32 "; factory: TS30 %" PRIu16 ", TS110 %" PRIu16 ", VREFINT %" PRIu16 "\n",
+		     temperature_raw, vrefint_raw, ts_cal1, ts_cal2, vrefint_cal);
+	return PX4_OK;
+}
+#endif
+
 int ADC::custom_command(int argc, char *argv[])
 {
 	const char *verb = argv[0];
@@ -368,6 +406,16 @@ int ADC::custom_command(int argc, char *argv[])
 
 		return PX4_ERROR;
 	}
+
+#if defined(CONFIG_ARCH_CHIP_STM32H7)
+	if (!strcmp(verb, "temperature")) {
+		if (is_running()) {
+			return _object.load()->print_temperature();
+		}
+
+		return PX4_ERROR;
+	}
+#endif
 
 	return print_usage("unknown command");
 }
@@ -412,6 +460,9 @@ ADC driver.
 	PRINT_MODULE_USAGE_NAME("adc", "driver");
 	PRINT_MODULE_USAGE_COMMAND("start");
 	PRINT_MODULE_USAGE_COMMAND("test");
+#if defined(CONFIG_ARCH_CHIP_STM32H7)
+	PRINT_MODULE_USAGE_COMMAND_DESCR("temperature", "Print the STM32H7 factory-calibrated die-temperature estimate.");
+#endif
 	PRINT_MODULE_USAGE_PARAM_FLAG('n', "Do not publish ADC report, only system power", true);
 	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
 

@@ -66,6 +66,9 @@ int stm32h7_flash_lock(size_t addr);
 int stm32h7_flash_unlock(size_t addr);
 int stm32h7_flash_writeprotect(size_t block, bool enabled);
 #define  stm32_flash_lock() stm32h7_flash_lock(PX4_FLASH_BASE)
-#define PX4_ADC_INTERNAL_TEMP_SENSOR_CHANNEL (20) //Valid for ADC3 on H7x3
+// Logical board-ADC channels for ADC3 internal sources. They must not collide
+// with physical ADC pins (the STM32H7 ADC driver maps them to VINP18/19).
+#define PX4_ADC_INTERNAL_TEMP_SENSOR_CHANNEL (20)
+#define PX4_ADC_INTERNAL_VREFINT_CHANNEL     (21)
 
 __END_DECLS
