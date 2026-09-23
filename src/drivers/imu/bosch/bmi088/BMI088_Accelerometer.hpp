@@ -74,16 +74,17 @@ private:
 	static_assert(sizeof(FIFOTransferBuffer) == (4 + FIFO_MAX_SAMPLES *sizeof(FIFO::DATA)));
 
 	// The FIFO stream starts after FIFO_LENGTH_0, FIFO_LENGTH_1 and one dummy
-	// byte. Using this same framing as FIFORead() removes data from the FIFO
-	// without issuing ACC_SOFTRESET.
+	// byte. Keep this buffer in the driver object rather than on the SPI work
+	// queue stack: a whole FIFO-depth transaction is needed to guarantee that
+	// no variable-length FIFO frame is read only partially.
 	struct FIFOFlushBuffer {
 		uint8_t cmd{static_cast<uint8_t>(Register::FIFO_LENGTH_0) | DIR_READ};
 		uint8_t dummy{0};
 		uint8_t FIFO_LENGTH_0{0};
 		uint8_t FIFO_LENGTH_1{0};
-		uint8_t data[FIFO_MAX_SAMPLES * sizeof(FIFO::DATA)] {};
+		uint8_t data[FIFO::SIZE] {};
 	};
-	static_assert(sizeof(FIFOFlushBuffer) == (4 + FIFO_MAX_SAMPLES *sizeof(FIFO::DATA)));
+	static_assert(sizeof(FIFOFlushBuffer) == (4 + FIFO::SIZE));
 
 	struct register_config_t {
 		Register reg;
@@ -127,6 +128,7 @@ private:
 	perf_counter_t _drdy_missed_perf{nullptr};
 
 	uint8_t _fifo_samples{static_cast<uint8_t>(_fifo_empty_interval_us / (1000000 / RATE))};
+	FIFOFlushBuffer _fifo_flush_buffer{};
 
 	bool _normal_mode_requested{false};
 	hrt_abstime _last_success_timestamp{0};

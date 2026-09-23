@@ -616,29 +616,29 @@ bool BMI088_Accelerometer::FIFOFlush()
 		return true;
 	}
 
-	// The FIFO is physically 1024 bytes. A larger value is not usable data but
-	// can still be recovered by consuming one complete FIFO depth.
-	uint16_t bytes_remaining = math::min(fifo_byte_counter, static_cast<uint16_t>(FIFO::SIZE));
-	const uint16_t bytes_to_discard = bytes_remaining;
+	// FIFO frames can be 2, 4, or 7 bytes. The BMI088 repeats any frame that
+	// is read only partly, so splitting a drain into fixed-size chunks can leave
+	// the FIFO perpetually non-empty. A single 1024-byte burst is at least one
+	// full FIFO depth and ends only after all frames present at its start have
+	// been consumed. The SPI2 DMA buffer is 2048 bytes; this is a startup-only
+	// transaction and does not affect steady-state polling load.
+	_fifo_flush_buffer.cmd = static_cast<uint8_t>(Register::FIFO_LENGTH_0) | DIR_READ;
 
-	while (bytes_remaining > 0) {
-		FIFOFlushBuffer buffer{};
-		const uint16_t bytes_this_transfer = math::min(bytes_remaining, static_cast<uint16_t>(sizeof(buffer.data)));
-
-		if (transfer(reinterpret_cast<uint8_t *>(&buffer), reinterpret_cast<uint8_t *>(&buffer),
-			     bytes_this_transfer + 4) != PX4_OK) {
-			perf_count(_bad_transfer_perf);
-			return false;
-		}
-
-		bytes_remaining -= bytes_this_transfer;
+	if (transfer(reinterpret_cast<uint8_t *>(&_fifo_flush_buffer), reinterpret_cast<uint8_t *>(&_fifo_flush_buffer),
+		     sizeof(_fifo_flush_buffer)) != PX4_OK) {
+		perf_count(_bad_transfer_perf);
+		return false;
 	}
+
+	const uint16_t fifo_byte_counter_after = FIFOReadCount();
+	const uint16_t bytes_remaining = (fifo_byte_counter_after == 0x8000) ? 0 : fifo_byte_counter_after;
 
 	// A software reboot leaves the sensor powered and can leave almost its
 	// entire FIFO full. Make this distinct from normal startup without adding
 	// any logging or work to the steady-state sampling path.
-	if (bytes_to_discard > FIFO_MAX_SAMPLES * sizeof(FIFO::DATA)) {
-		PX4_INFO("ACC discarded %u stale FIFO bytes after MCU reset", static_cast<unsigned>(bytes_to_discard));
+	if (fifo_byte_counter > FIFO_MAX_SAMPLES * sizeof(FIFO::DATA)) {
+		PX4_INFO("ACC discarded %u stale FIFO bytes after MCU reset (%u bytes remain)",
+			 static_cast<unsigned>(fifo_byte_counter), static_cast<unsigned>(bytes_remaining));
 	}
 
 	return true;
