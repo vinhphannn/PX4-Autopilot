@@ -244,13 +244,21 @@ void BMI088_Accelerometer::RunImpl()
 				const uint16_t fifo_byte_counter = FIFOReadCount();
 
 				if (fifo_byte_counter >= FIFO::SIZE) {
-					PX4_WARN("ACC FIFO overflow (%u bytes), discarding", static_cast<unsigned>(fifo_byte_counter));
-					FIFOReset();
-					perf_count(_fifo_overflow_perf);
+					// A single malformed count has been observed immediately after
+					// an MCU-only reset while the BMI088 remains powered. Do not
+					// turn one bad readback into a second FIFO reset; a real full
+					// FIFO remains full at the following 1.25 ms poll.
+					if (++_consecutive_invalid_fifo_count >= 2) {
+						PX4_WARN("ACC FIFO overflow (%u bytes), discarding", static_cast<unsigned>(fifo_byte_counter));
+						FIFOReset();
+						perf_count(_fifo_overflow_perf);
+						_consecutive_invalid_fifo_count = 0;
+					}
 
 				} else if ((fifo_byte_counter == 0) || (fifo_byte_counter == 0x8000)) {
 					// An empty FIFO corresponds to 0x8000
 					perf_count(_fifo_empty_perf);
+					_consecutive_invalid_fifo_count = 0;
 
 				} else {
 					samples = fifo_byte_counter / sizeof(FIFO::DATA);
@@ -263,9 +271,16 @@ void BMI088_Accelerometer::RunImpl()
 
 					if (samples > FIFO_MAX_SAMPLES) {
 						// not technically an overflow, but more samples than we expected or can publish
-						FIFOReset();
-						perf_count(_fifo_overflow_perf);
+						if (++_consecutive_invalid_fifo_count >= 2) {
+							FIFOReset();
+							perf_count(_fifo_overflow_perf);
+							_consecutive_invalid_fifo_count = 0;
+						}
+
 						samples = 0;
+
+					} else {
+						_consecutive_invalid_fifo_count = 0;
 					}
 				}
 			}
@@ -689,6 +704,7 @@ void BMI088_Accelerometer::FIFOReset()
 	// and its SPI session intact. This matters after an MCU-only reboot, where
 	// the powered sensor retains samples from before the reboot.
 	FIFOFlush();
+	_consecutive_invalid_fifo_count = 0;
 
 	_drdy_timestamp_sample.store(0);
 }
