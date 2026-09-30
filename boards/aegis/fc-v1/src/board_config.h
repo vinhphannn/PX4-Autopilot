@@ -103,10 +103,16 @@
 
 /* PWM
  *
- * The board routes exactly eight actuator outputs. PWM1-PWM4 are the
- * four outputs on TIM1 and are intentionally first: PX4 bidirectional
- * DShot can operate on one timer only, so this is the ESC 4-in-1 group.
- * PWM5-PWM8 are conventional/DShot-capable auxiliary outputs.
+ * The board routes exactly eight physical MAIN actuator outputs. Their
+ * logical order is defined in timer_config.cpp and was verified with the QGC
+ * actuator test. The physical connector numbering is interleaved by timer:
+ * QGC MAIN1..8 maps to physical MAIN1, MAIN5, MAIN2, MAIN6,
+ * MAIN3, MAIN7, MAIN4, MAIN8 respectively.
+ *
+ * Bidirectional DShot requires all participating outputs to share a timer.
+ * On this PCB the TIM1 group is physical MAIN1, MAIN5, MAIN2 and MAIN6
+ * (QGC MAIN1-MAIN4). Physical MAIN1-MAIN4 therefore cannot be used together
+ * for bidirectional DShot; this is fixed by PCB routing, not output ordering.
  */
 #define DIRECT_PWM_OUTPUT_CHANNELS   8
 #define DIRECT_INPUT_TIMER_CHANNELS  8

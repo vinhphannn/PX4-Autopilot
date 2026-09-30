@@ -40,13 +40,17 @@ constexpr io_timers_t io_timers[MAX_IO_TIMERS] = {
 };
 
 constexpr timer_io_channels_t timer_io_channels[MAX_TIMER_IO_CHANNELS] = {
-	// ESC 4-in-1: one timer is required for bidirectional DShot.
+	// Channels sharing a timer must remain contiguous for PX4's io_timer mapping.
+	// QGC MAIN output -> physical connector, verified by actuator test:
+	// 1 -> MAIN1 (TIM1_CH4, PE14)   2 -> MAIN5 (TIM1_CH3, PE13)
+	// 3 -> MAIN2 (TIM1_CH2, PE11)   4 -> MAIN6 (TIM1_CH1, PE9)
+	// 5 -> MAIN3 (TIM3_CH4, PB1)    6 -> MAIN7 (TIM3_CH3, PB0)
+	// 7 -> MAIN4 (TIM4_CH1, PD12)   8 -> MAIN8 (TIM4_CH2, PD13)
 	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel4}, {GPIO::PortE, GPIO::Pin14}),
 	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel3}, {GPIO::PortE, GPIO::Pin13}),
 	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel2}, {GPIO::PortE, GPIO::Pin11}),
 	initIOTimerChannel(io_timers, {Timer::Timer1, Timer::Channel1}, {GPIO::PortE, GPIO::Pin9}),
 
-	// Auxiliary outputs.
 	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::Channel4}, {GPIO::PortB, GPIO::Pin1}),
 	initIOTimerChannel(io_timers, {Timer::Timer3, Timer::Channel3}, {GPIO::PortB, GPIO::Pin0}),
 	initIOTimerChannel(io_timers, {Timer::Timer4, Timer::Channel1}, {GPIO::PortD, GPIO::Pin12}),
