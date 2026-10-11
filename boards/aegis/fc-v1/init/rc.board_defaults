@@ -9,6 +9,9 @@ param set-default BAT1_V_DIV 21.12
 param set-default BAT1_V_EMPTY 3.2
 
 param set-default SYS_HAS_MAG 1
+# Standard Aegis vehicle installation: board forward points toward vehicle rear.
+# Keep individual IMU chip rotations in rc.board_sensors unchanged.
+param set-default SENS_BOARD_ROT 4
 param set-default PWM_MAIN_TIM0 -4
 param set-default RC_INPUT_PROTO -1
 
