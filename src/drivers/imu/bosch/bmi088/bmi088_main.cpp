@@ -43,6 +43,7 @@ void BMI088::print_usage()
 	PRINT_MODULE_USAGE_COMMAND("start");
 	PRINT_MODULE_USAGE_PARAM_FLAG('A', "Accel", true);
 	PRINT_MODULE_USAGE_PARAM_FLAG('G', "Gyro", true);
+	PRINT_MODULE_USAGE_PARAM_FLAG('v', "Trace up to 96 register accesses; adds write/readback delay", true);
 	PRINT_MODULE_USAGE_PARAMS_I2C_SPI_DRIVER(false, true);
 	PRINT_MODULE_USAGE_PARAM_INT('R', 0, 0, 35, "Rotation", true);
 	PRINT_MODULE_USAGE_DEFAULT_COMMANDS();
@@ -57,8 +58,11 @@ extern "C" int bmi088_main(int argc, char *argv[])
 	cli.default_spi_frequency = 10000000;
 	const char *name = MODULE_NAME;
 
-	while ((ch = cli.getOpt(argc, argv, "AGR:")) != EOF) {
+	while ((ch = cli.getOpt(argc, argv, "AGR:v")) != EOF) {
 		switch (ch) {
+		case 'v':
+			cli.custom1 = 1;
+			break;
 		case 'A':
 			type = DRV_ACC_DEVTYPE_BMI088;
 			name = MODULE_NAME "_accel";

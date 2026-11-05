@@ -6,14 +6,15 @@
 board_adc start
 
 # BMI088 production baseline: SPI2 DMA polling at 1 MHz, gyro before accel.
-# -R 4 is ROTATION_YAW_180, matching the installed IMU orientation.
+# Chip-to-board rotation verified with level, nose-up and right-edge-up
+# measurements on 2026-11-05. Vehicle mounting is separate (SENS_BOARD_ROT).
 # DRDY remains disabled; see bmi088_analysis.md for measured rationale.
-bmi088 -s -b 2 -G -R 4 -f 1000 start
-bmi088 -s -b 2 -A -R 4 -f 1000 start
+bmi088 -s -b 2 -G -R 0 -f 1000 start
+bmi088 -s -b 2 -A -R 0 -f 1000 start
 
-# BMI160 redundant IMU: SPI3 DMA polling at 1 MHz.
-# -R 12 is ROTATION_PITCH_180, verified against the BMI088 gravity vector.
-bmi160 -s -b 3 -R 12 -f 1000 start
+# BMI270 replacement IMU on SPI3 at 1 MHz, using the existing PA15 CS.
+# The same three-pose measurement verifies ROTATION_NONE for this chip too.
+bmi270 -s -b 3 -R 0 -f 1000 start
 
 # Internal baro
 bmp280 -I -b 2 start

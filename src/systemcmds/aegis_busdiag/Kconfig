@@ -1,0 +1,6 @@
+menuconfig SYSTEMCMDS_AEGIS_BUSDIAG
+	bool "aegis_busdiag"
+	default n
+	depends on PLATFORM_NUTTX && BOARD_ARCHITECTURE = "cortex-m7" && DRIVERS_IMU_BOSCH_BMI088
+	---help---
+		Bench-only raw sensor bus diagnostics for the Aegis FC board.

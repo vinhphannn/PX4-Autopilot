@@ -57,6 +57,11 @@ public:
 
 protected:
 
+	void TraceRegister(const char *op, uint8_t reg, uint8_t value, int ret,
+			   const uint8_t *rx, unsigned length);
+	bool TraceEnabled() const { return _trace_remaining > 0; }
+	unsigned _trace_remaining{0};
+
 	bool Reset();
 
 	const spi_drdy_gpio_t _drdy_gpio;

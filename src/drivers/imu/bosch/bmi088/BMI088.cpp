@@ -65,6 +65,18 @@ BMI088::BMI088(const I2CSPIDriverConfig &config) :
 	I2CSPIDriver(config),
 	_drdy_gpio(config.drdy_gpio)
 {
+	_trace_remaining = config.custom1 ? 96 : 0;
+}
+
+void BMI088::TraceRegister(const char *op, uint8_t reg, uint8_t value, int ret,
+			  const uint8_t *rx, unsigned length)
+{
+	if (_trace_remaining == 0) { return; }
+
+	--_trace_remaining;
+	PX4_INFO("REG %s type=0x%02x reg=0x%02x value=0x%02x ret=%d state=%u RX[%u]=%02x %02x %02x",
+		 op, get_device_type(), reg, value, ret, static_cast<unsigned>(_state), length,
+		 rx[0], length > 1 ? rx[1] : 0, length > 2 ? rx[2] : 0);
 }
 
 int BMI088::init()

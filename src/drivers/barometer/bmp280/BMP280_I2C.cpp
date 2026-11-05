@@ -64,6 +64,9 @@ public:
 private:
 	bmp280::calibration_s	_cal{};
 	bmp280::data_s		_data{};
+#if defined(CONFIG_SYSTEMCMDS_AEGIS_BUSDIAG)
+	unsigned _trace_remaining{24};
+#endif
 };
 
 bmp280::IBMP280 *bmp280_i2c_interface(uint8_t busnum, uint32_t device, int bus_frequency)
@@ -80,7 +83,15 @@ uint8_t
 BMP280_I2C::get_reg(uint8_t addr)
 {
 	uint8_t cmd[2] = { (uint8_t)(addr), 0};
-	transfer(&cmd[0], 1, &cmd[1], 1);
+	const int ret = transfer(&cmd[0], 1, &cmd[1], 1);
+#if defined(CONFIG_SYSTEMCMDS_AEGIS_BUSDIAG)
+	if (_trace_remaining > 0) {
+		--_trace_remaining;
+		PX4_INFO("I2C R addr=0x%02x reg=0x%02x rx=0x%02x ret=%d", get_device_address(), addr, cmd[1], ret);
+	}
+#else
+	(void)ret;
+#endif
 
 	return cmd[1];
 }
@@ -89,7 +100,11 @@ int
 BMP280_I2C::set_reg(uint8_t value, uint8_t addr)
 {
 	uint8_t cmd[2] = { (uint8_t)(addr), value};
-	return transfer(cmd, sizeof(cmd), nullptr, 0);
+	const int ret = transfer(cmd, sizeof(cmd), nullptr, 0);
+#if defined(CONFIG_SYSTEMCMDS_AEGIS_BUSDIAG)
+	PX4_INFO("I2C W addr=0x%02x reg=0x%02x value=0x%02x ret=%d", get_device_address(), addr, value, ret);
+#endif
+	return ret;
 }
 
 bmp280::data_s *

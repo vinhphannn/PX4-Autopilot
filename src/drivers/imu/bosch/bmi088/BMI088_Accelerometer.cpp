@@ -480,14 +480,26 @@ uint8_t BMI088_Accelerometer::RegisterRead(Register reg)
 	uint8_t cmd[3] {};
 	cmd[0] = static_cast<uint8_t>(reg) | DIR_READ;
 	// cmd[1] dummy byte
-	transfer(cmd, cmd, sizeof(cmd));
+	const int ret = transfer(cmd, cmd, sizeof(cmd));
+	if (ret != PX4_OK) { perf_count(_bad_transfer_perf); }
+	TraceRegister("R", static_cast<uint8_t>(reg), cmd[2], ret, cmd, sizeof(cmd));
 	return cmd[2];
 }
 
 void BMI088_Accelerometer::RegisterWrite(Register reg, uint8_t value)
 {
 	uint8_t cmd[2] { (uint8_t)reg, value };
-	transfer(cmd, cmd, sizeof(cmd));
+	const bool verify = TraceEnabled() && reg != Register::ACC_SOFTRESET;
+	const int ret = transfer(cmd, cmd, sizeof(cmd));
+	if (ret != PX4_OK) { perf_count(_bad_transfer_perf); }
+	TraceRegister("W", static_cast<uint8_t>(reg), value, ret, cmd, sizeof(cmd));
+	if (verify && ret == PX4_OK) {
+		// Diagnostic mode only: respect suspend/normal-mode write settling time.
+		px4_usleep(1000);
+		const uint8_t readback = RegisterRead(reg);
+		PX4_INFO("VERIFY reg=0x%02x wrote=0x%02x read=0x%02x equal=%u",
+			 static_cast<unsigned>(reg), value, readback, static_cast<unsigned>(value == readback));
+	}
 }
 
 void BMI088_Accelerometer::RegisterSetAndClearBits(Register reg, uint8_t setbits, uint8_t clearbits)
