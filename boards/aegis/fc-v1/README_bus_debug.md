@@ -35,3 +35,11 @@ Full local measurement logs are in the separate hardware workspace:
 
 - `/home/zynh/Projects/Aegis-FC/docs/diagnostics/2026-11-05-register-debug/`
 - `/home/zynh/Projects/Aegis-FC/docs/diagnostics/2026-11-05-imu-orientation/`
+
+## Follow-up: board-to-body rotation, 2026-11-06
+
+The R0 driver outputs agree between both accelerometers in nose-down and right-edge-down tests. A further comparison found vehicle_imu X/Y reversed relative to sensor_accel, despite the CLI reporting SENS_BOARD_ROT=0. Refreshing board rotation from 0 to 4 and back to 0 corrected the applied transform. The startup default still specified yaw 180; it is now changed to 0 for the board front used in these checks. The exact earlier event that left the applied transform inconsistent with the CLI value has not been identified.
+
+After building, uploading and verifying the application, ROMFS readback confirms default 0 and all IMU drivers R0. A static tilted sample after reboot confirms raw and body X/Y have matching signs for both IMUs. Existing level adjustment and calibration offsets/scales were retained.
+
+Simultaneous 50 Hz SCALED_IMU/2 captures show roll gyro correlation 0.9990 and pitch correlation 0.9584 after small time alignment. The pitch capture contains abrupt high-rate motion with larger transient differences; these samples do not establish flight readiness or distinguish sampling/filter effects from sensor faults at the peaks. No independent yaw-motion test was made. Full local follow-up logs: `/home/zynh/Projects/Aegis-FC/docs/diagnostics/2026-11-06-imu-recheck/`.
